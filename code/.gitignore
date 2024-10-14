@@ -1,0 +1,7 @@
+.vscode
+*.lst
+*.map
+*.elf
+*.hex
+*.bin
+*.bak
