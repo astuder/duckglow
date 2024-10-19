@@ -281,6 +281,17 @@ int main()
 	Delay_Ms(100);
 	uint8_t i2c_addr = I2C_ADDR + (((funDigitalRead(PD6) << 1) + funDigitalRead(PD5)) ^ 3);
 
+	// detect RGB LED of R pin reads high despite pull-down (3.3V - 2V = 1.3V)
+	funPinMode(LED_R_PIN, GPIO_CFGLR_IN_PUPD);
+	funPinMode(LED_R_PIN, 0);
+	Delay_Ms(10);
+	if (funDigitalRead(LED_R_PIN) == 0) {
+		// No RGB LED connected -> hard coded default I2C settings for for UV duck
+		i2c_regs.regs.max[2] = 255;
+		i2c_regs.regs.min[2] = 0;
+		i2c_regs.regs.speed[2] = 2;
+	}
+
 	// load presets from flash
 	presets_load();
 
