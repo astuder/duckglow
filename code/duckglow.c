@@ -130,7 +130,7 @@ void t2cap_init(void)
 
 
 // address of first R/W I2C register
-#define I2C_REG_START 0xf0
+#define I2C_REG_START 0xe0
 
 // structure of I2C registers
 struct i2c_regs_t {
@@ -140,6 +140,7 @@ struct i2c_regs_t {
 			volatile uint8_t max[4];		// max LED brightness RGB,BG
 			volatile uint8_t min[4];		// min LED brightness RGB,BG
 			volatile uint8_t speed[4];		// LED fader speed RGB,BG
+			volatile uint8_t phase[4];		// LED fader phase RGB,BG (0-255, offset into lookup-table)
 			volatile uint8_t save;			// 0x42 = save current register settings to flash
 		} regs;
 		uint8_t data[255];
@@ -159,14 +160,16 @@ struct i2c_regs_t i2c_regs = {
 			"When it dines or sups,\n"
 			"It bottoms ups.\n\n"
 			"Regs (R,G,B,BG):\n"
-			"0xF0 max\n"
-			"0xF4 min\n"
-			"0xF8 spd\n"
-			"0xFC 42=save\0",
-			{ 64, 64, 0, 255 },			// RGB, BG max
-			{ 10, 10, 0, 0 },			// RGB, BG min
-			{ 2, 2, 0, 10 },			// RGB, BG speed
-			0							// save
+			"E0 max\n"
+			"E4 min\n"
+			"E8 spd\n"
+			"EC ph\n"
+			"F0 42=save\0",
+			{ 64, 64, 0, 255 },		// RGB, BG max
+			{ 10, 10, 0, 0 },		// RGB, BG min
+			{ 2, 2, 0, 2 },			// RGB, BG speed
+			{ 0, 0, 0, 128 },		// RGB, BG phase
+			0						// save
 		}
 	}
 };
@@ -196,7 +199,7 @@ typedef struct {
 } presets_t;
 
 #define PRESETS_MAGIC 0x6475636b	// "duck"
-#define PRESETS_VERSION 1		// increment when modifing I2C register structure
+#define PRESETS_VERSION 2		// increment when modifing I2C register structure
 #define PRESETS_REGS_SIZE (sizeof(i2c_regs.regs) - sizeof(i2c_regs.regs.poem) - 1)
 #define PRESETS_ADDR 0x08003fc0	// points to page 255 in flash, we hope our code will never use that much flash
 
@@ -266,7 +269,7 @@ bool presets_save(void)
 int main()
 {
 	SystemInit();
-    funGpioInitAll();
+	funGpioInitAll();
 
 	// set I2C address based on jumper configuration
 	// PD5 connected to GND adds 1 to I2C_ADDR
@@ -286,13 +289,14 @@ int main()
 	funPinMode(PC2, GPIO_CFGLR_OUT_10Mhz_AF_OD);
 	SetupI2CSlave(i2c_addr, i2c_regs.data, sizeof(i2c_regs.data), on_i2c_write, on_i2c_read, false);
 
-    // init TIM1 for PWM
-    t1pwm_init();
+	// init TIM1 for PWM
+	t1pwm_init();
 
 	// init TIM2 for input capture mode
 	t2cap_init();
 
-	uint16_t idx[4] = { 0, 0, 0, sine_size/2 };
+	uint16_t idx[4] = { 0, 0, 0, 0 };
+	uint16_t pos[4] = { i2c_regs.regs.phase[0]<<2, i2c_regs.regs.phase[1]<<2, i2c_regs.regs.phase[2]<<2, i2c_regs.regs.phase[3]<<2 };
 	uint32_t val;
 
 	while(1)
@@ -319,7 +323,7 @@ int main()
 				// do sine fading if speed is set
 				uint16_t max = i2c_regs.regs.max[ch] << PWM_SCALE;
 				uint16_t min = i2c_regs.regs.min[ch] << PWM_SCALE;
-				val = ((((uint32_t) sine[idx[ch]]) * (max - min)) >> 16) + min;
+				val = ((((uint32_t) sine[pos[ch]]) * (max - min)) >> 16) + min;
 				if (val >= PWM_STEPS)
 				{
 					val = PWM_STEPS-1;
@@ -328,7 +332,12 @@ int main()
 				idx[ch] += i2c_regs.regs.speed[ch];
 				if (idx[ch] >= sine_size)
 				{
-					idx[ch] = idx[ch] - sine_size;
+					idx[ch] -= sine_size;
+				}
+				pos[ch] = idx[ch] + (i2c_regs.regs.phase[ch]<<2);
+				if (pos[ch] >= sine_size)
+				{
+					pos[ch] -= sine_size;
 				}
 			}
 		}
