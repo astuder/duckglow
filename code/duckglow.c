@@ -130,7 +130,7 @@ void t2cap_init(void)
 
 
 // address of first R/W I2C register
-#define I2C_REG_START 0xe0
+#define I2C_REG_START 0xec
 
 // structure of I2C registers
 struct i2c_regs_t {
@@ -141,6 +141,7 @@ struct i2c_regs_t {
 			volatile uint8_t min[4];		// min LED brightness RGB,BG
 			volatile uint8_t speed[4];		// LED fader speed RGB,BG
 			volatile uint8_t phase[4];		// LED fader phase RGB,BG (0-255, offset into lookup-table)
+			volatile uint8_t mode;			// Bits 0-1: auto/I2C/WS2812 mode, bit 4: detected LED type RGB/UV
 			volatile uint8_t save;			// 0x42 = save current register settings to flash
 		} regs;
 		uint8_t data[255];
@@ -160,24 +161,33 @@ struct i2c_regs_t i2c_regs = {
 			"When it dines or sups,\n"
 			"It bottoms ups.\n\n"
 			"Regs (R,G,B,BG):\n"
-			"E0 max\n"
-			"E4 min\n"
-			"E8 spd\n"
-			"EC ph\n"
-			"F0 42=save\0",
+			"EC max\n"
+			"F0 min\n"
+			"F4 spd\n"
+			"F8 ph\n"
+			"FC bit0-1 auto/i2c/ws 4 rgb/uv\n"
+			"FD 42=save\0",
 			{ 64, 64, 0, 255 },		// RGB, BG max
 			{ 10, 10, 0, 0 },		// RGB, BG min
 			{ 2, 2, 0, 2 },			// RGB, BG speed
 			{ 0, 0, 0, 128 },		// RGB, BG phase
-			0						// save
+			0, 0					// mode, save
 		}
 	}
 };
 
+// flag to indicate detection of UV LED
+volatile uint8_t uv_led = 0;
+
 // callback after I2C write transaction
 void on_i2c_write(uint8_t reg, uint8_t length)
 {
-	// do something?
+	// enforce read-only bit for detected LED type
+	if (uv_led) {
+		i2c_regs.regs.mode |= 0x10;
+	} else {
+		i2c_regs.regs.mode &= 0xef;
+	}
 }
 
 // callback after I2C read 
@@ -285,11 +295,14 @@ int main()
 	funPinMode(LED_R_PIN, GPIO_CFGLR_IN_PUPD);
 	funPinMode(LED_R_PIN, 0);
 	Delay_Ms(10);
+	uv_led = 0;
 	if (funDigitalRead(LED_R_PIN) == 0) {
 		// No RGB LED connected -> hard coded default I2C settings for for UV duck
 		i2c_regs.regs.max[2] = 255;
 		i2c_regs.regs.min[2] = 0;
 		i2c_regs.regs.speed[2] = 2;
+		i2c_regs.regs.mode |= 0x10;	// set bit to indicate UV LED
+		uv_led = 1;
 	}
 
 	// load presets from flash

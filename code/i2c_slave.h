@@ -34,7 +34,7 @@
 
 // read-only register range, writes will be ignored
 #define RO_START    0
-#define RO_END      0xef
+#define RO_END      0xeb
 
 typedef void (*i2c_write_callback_t)(uint8_t reg, uint8_t length);
 typedef void (*i2c_read_callback_t)(uint8_t reg);
