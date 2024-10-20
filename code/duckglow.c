@@ -291,9 +291,11 @@ int main()
 	Delay_Ms(100);
 	uint8_t i2c_addr = I2C_ADDR + (((funDigitalRead(PD6) << 1) + funDigitalRead(PD5)) ^ 3);
 
-	// detect RGB LED of R pin reads high despite pull-down (3.3V - 2V = 1.3V)
+	// detect RGB LED on R pin with pull-down reads highish
 	funPinMode(LED_R_PIN, GPIO_CFGLR_IN_PUPD);
-	funPinMode(LED_R_PIN, 0);
+	funDigitalWrite(LED_R_PIN, 1);	// start high to use 150mV schmitt trigger hystersis to over benefit
+	Delay_Ms(10);
+	funDigitalWrite(LED_R_PIN, 0);
 	Delay_Ms(10);
 	uv_led = 0;
 	if (funDigitalRead(LED_R_PIN) == 0) {
