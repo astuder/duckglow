@@ -242,8 +242,23 @@ bool presets_save(void)
 	presets_t p;
 	p.fields.magic = PRESETS_MAGIC;
 	p.fields.version = PRESETS_VERSION;
+	for (uint8_t i=0; i<16; i++) {
+		p.raw[i] = 0;
+	}
 	for (uint8_t i=0; i<PRESETS_REGS_SIZE; i++) {
 		p.fields.regs[i] = i2c_regs.data[I2C_REG_START+i];
+	}
+
+	// check if writing to flash is needed, prevents excessive wear
+	uint8_t diff = 0;
+	for (uint8_t i=0; i<16; i++) {
+		if (p.raw[i] != flash_presets->raw[i]) {
+			diff++;
+		}
+	}
+	if (diff == 0) {
+		// presets already up-to-date, still report success
+		return 1;
 	}
 
 	// unlock flash
