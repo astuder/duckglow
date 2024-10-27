@@ -26,6 +26,12 @@
 
 uint8_t pwm_chan[] = { LED_R_CH, LED_G_CH, LED_B_CH, LED_BG_CH };
 
+// flag to indicate detection of UV LED
+volatile uint8_t uv_led = 0;
+
+// flag to indicate I2C (0) or WS2812 (1) LED control
+volatile uint8_t ws2812_mode = 0;
+
 // setup timer 1 for PWM to drive LEDs
 void t1pwm_init(void)
 {
@@ -96,20 +102,6 @@ void t1pwm_setpw(uint8_t channel, uint16_t width)
 // setup timer 2 to decode WS2812 protocol
 void t2cap_init(void)
 {
-	// WS2812 timing
-	// datasheet:
-	// 0: 0.35us / 0.8us
-	// 1: 0.7us / 0.6us
-	// 1.25us +/- 0.6us per bit
-	// latch: > 50us
-	// https://wp.josh.com/2014/05/13/ws2812-neopixels-are-not-so-finicky-once-you-get-to-know-them/
-	// 0: 0.2-0.5us high pulse
-	// 1: >0.5us high pulse
-	// latch: > 6us low
-	// simiplified
-	// if high pulse <= 5: 0, else: 1
-	// if low for more than 6us, latch
-
 	// configure pin as input with pull-down
 	funPinMode(WS2812_PIN, GPIO_CFGLR_IN_PUPD);
 	funDigitalWrite(WS2812_PIN, 0);
@@ -117,17 +109,30 @@ void t2cap_init(void)
 	// enable TIM2
 	RCC->APB1PCENR |= RCC_APB1Periph_TIM2;
 
-	// Reset TIM2 to init all regs
+	// reset TIM2 to init all regs
 	RCC->APB1PRSTR |= RCC_APB1Periph_TIM2;
 	RCC->APB1PRSTR &= ~RCC_APB1Periph_TIM2;
 
-	// Prescaler 48MHz/5 -> ~0.1us resolution
-	TIM2->PSC = 5;
+	// prescaler 48MHz/(1+1) -> 12 ticks = 0.5us
+	TIM2->PSC = 1;
 
+	// TIM2CH3 is an input
+	TIM2->CHCTLR2 = TIM_CC3S_0;
 
+	// TI1 = XOR TIM2CH1,2,3, workaround to route CH3 to TI1
+	TIM2->CTLR2 = TIM_TI1S;
 
+	// Mux output of TI1 edge detector as TRGI
+	// Reset mode: counter reset when TRGI goes high, counter latched on trigger
+	TIM2->SMCFGR = TIM_TS_TI1F_ED + TIM_SlaveMode_Reset;
+
+	// enable capture compare for TIM2CH3
+	// set polarity of TIM2CH3 to capture timer value on falling edge
+	TIM2->CCER = TIM_CC3E + TIM_CC3P;
+
+ 	// enable counter
+	TIM2->CTLR1 |= TIM_CEN;
 }
-
 
 // address of first R/W I2C register
 #define I2C_REG_START 0xec
@@ -165,7 +170,7 @@ struct i2c_regs_t i2c_regs = {
 			"F0 min\n"
 			"F4 spd\n"
 			"F8 ph\n"
-			"FC bit0-1 auto/i2c/ws 4 rgb/uv\n"
+			"FC [0-1]auto/i2c/ws [4]rgb/uv\n"
 			"FD 42=save\0",
 			{ 64, 64, 0, 255 },		// RGB, BG max
 			{ 10, 10, 0, 0 },		// RGB, BG min
@@ -176,9 +181,6 @@ struct i2c_regs_t i2c_regs = {
 	}
 };
 
-// flag to indicate detection of UV LED
-volatile uint8_t uv_led = 0;
-
 // callback after I2C write transaction
 void on_i2c_write(uint8_t reg, uint8_t length)
 {
@@ -188,6 +190,9 @@ void on_i2c_write(uint8_t reg, uint8_t length)
 	} else {
 		i2c_regs.regs.mode &= 0xef;
 	}
+
+	// force out of ws2812 mode to reevaluate configuration
+	ws2812_mode = 0;
 }
 
 // callback after I2C read 
@@ -281,6 +286,14 @@ int main()
 	SystemInit();
 	funGpioInitAll();
 
+	// enable pins routed test point and to lower right teeth, set them all low
+	funPinMode(PD0, GPIO_CFGLR_OUT_10Mhz_PP);	// test point
+	funPinMode(PD3, GPIO_CFGLR_OUT_10Mhz_PP);	// tooth, 2nd from right
+	funPinMode(PD4, GPIO_CFGLR_OUT_10Mhz_PP);	// tooth, lower right 
+	funDigitalWrite(PD0, 0);
+	funDigitalWrite(PD3, 0);
+	funDigitalWrite(PD4, 0);
+
 	// set I2C address based on jumper configuration
 	// PD5 connected to GND adds 1 to I2C_ADDR
 	// PD6 connected to GND adds 2 to I2C_ADDR
@@ -332,38 +345,134 @@ int main()
 			i2c_regs.regs.save = 0;
 		}
 
-		for (uint8_t ch = 0; ch < 4; ch++)
-		{
-			if (i2c_regs.regs.speed[ch] == 0)
-			{
-				// use fixed color if speed = 0
-				val = i2c_regs.regs.max[ch] << PWM_SCALE;
-				if (val >= PWM_STEPS)
-				{
-					val = PWM_STEPS-1;
+		uint8_t led_mode = i2c_regs.regs.mode & 0x03;
+		if (led_mode == 0) {
+			// auto-detect WS2812 mode if there's a pulse <2us)
+			if (TIM2->INTFR & TIM_CC3IF) {
+				uint16_t cv = TIM2->CH3CVR;
+				if (cv > 0 && cv < 48) {
+					ws2812_mode = 1;
 				}
-				t1pwm_setpw(pwm_chan[ch], val);
 			}
-			else
+		} else if (led_mode == 2) {
+			// configured in ws2812 mode
+			ws2812_mode = 1;
+		} else {
+			// configured in I2C mode
+			ws2812_mode = 0;
+		}
+
+		if (ws2812_mode) {
+			// WS2812 timing
+			// datasheet:
+			// 0: 0.35us / 0.8us
+			// 1: 0.7us / 0.6us
+			// 1.25us +/- 0.6us per bit
+			// latch: > 50us
+			// https://wp.josh.com/2014/05/13/ws2812-neopixels-are-not-so-finicky-once-you-get-to-know-them/
+			// 0: 0.2-0.5us pulse
+			// 1: >0.5us pulse
+			// latch: > 6us low
+			// simiplified
+			// if pulse <= 0.5us: 0, else: 1
+			// if low for more than 6us, latch
+			while (ws2812_mode)
 			{
-				// do sine fading if speed is set
-				uint16_t max = i2c_regs.regs.max[ch] << PWM_SCALE;
-				uint16_t min = i2c_regs.regs.min[ch] << PWM_SCALE;
-				val = ((((uint32_t) sine[pos[ch]]) * (max - min)) >> 16) + min;
-				if (val >= PWM_STEPS)
+				uint32_t low_time;
+				uint32_t color;
+				uint8_t end_pulse;
+
+				end_pulse = 0;
+				color = 0;
+
+				// wait for first pulse
+				while (!(TIM2->INTFR & TIM_CC3IF)) {
+					if(ws2812_mode == 0) {
+						goto skip_ws2812;	// exiting ws2812 mode. oh no! a goto! :)
+					}
+				};
+
+				// prevent disruption until end pulse or invalid bit
+				__disable_irq();
+
+				while (!end_pulse)
 				{
-					val = PWM_STEPS-1;
+					// read pulse length
+					uint16_t p = TIM2->CH3CVR;
+					if (p < 12) {
+						// pulse is T0H length (less than approx. 0.5us)
+						color <<= 1;
+					} else if (p < 48) {
+						// pulse is T1H length
+						color = (color << 1) | 1;
+					} else {
+						// treat pulse > 2us as error
+						break;
+					}
+
+					// wait for next pulse
+					low_time = 0;
+					while (!(TIM2->INTFR & TIM_CC3IF))
+					{
+						low_time++;
+						if (low_time == 30) {
+							// no pulse for 6+ us, end of transmission
+							end_pulse = 1;
+							break;
+						}
+					}
 				}
-				t1pwm_setpw(pwm_chan[ch], val);
-				idx[ch] += i2c_regs.regs.speed[ch];
-				if (idx[ch] >= sine_size)
-				{
-					idx[ch] -= sine_size;
+
+				__enable_irq();
+
+				if (end_pulse) {
+					// latch color into LEDs
+					// final GRB tripplet is duck, final byte (blue) of second-to-last tripplet is background
+					t1pwm_setpw(pwm_chan[2], (color & 0xff) << PWM_SCALE);	// duck blue
+					color >>= 8;
+					t1pwm_setpw(pwm_chan[0], (color & 0xff) << PWM_SCALE);	// duck red
+					color >>= 8;
+					t1pwm_setpw(pwm_chan[1], (color & 0xff) << PWM_SCALE);	// duck green
+					color >>= 8;
+					t1pwm_setpw(pwm_chan[3], (color & 0xff) << PWM_SCALE);	// background
 				}
-				pos[ch] = idx[ch] + (i2c_regs.regs.phase[ch]<<2);
-				if (pos[ch] >= sine_size)
+
+				skip_ws2812:
+			}
+		} else {
+			for (uint8_t ch = 0; ch < 4; ch++)
+			{
+				if (i2c_regs.regs.speed[ch] == 0)
 				{
-					pos[ch] -= sine_size;
+					// use fixed color if speed = 0
+					val = i2c_regs.regs.max[ch] << PWM_SCALE;
+					if (val >= PWM_STEPS)
+					{
+						val = PWM_STEPS-1;
+					}
+					t1pwm_setpw(pwm_chan[ch], val);
+				}
+				else
+				{
+					// do sine fading if speed is set
+					uint16_t max = i2c_regs.regs.max[ch] << PWM_SCALE;
+					uint16_t min = i2c_regs.regs.min[ch] << PWM_SCALE;
+					val = ((((uint32_t) sine[pos[ch]]) * (max - min)) >> 16) + min;
+					if (val >= PWM_STEPS)
+					{
+						val = PWM_STEPS-1;
+					}
+					t1pwm_setpw(pwm_chan[ch], val);
+					idx[ch] += i2c_regs.regs.speed[ch];
+					if (idx[ch] >= sine_size)
+					{
+						idx[ch] -= sine_size;
+					}
+					pos[ch] = idx[ch] + (i2c_regs.regs.phase[ch]<<2);
+					if (pos[ch] >= sine_size)
+					{
+						pos[ch] -= sine_size;
+					}
 				}
 			}
 		}
