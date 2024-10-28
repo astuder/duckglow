@@ -68,24 +68,12 @@ Wire.write(0x0);
 Wire.endTransmission();
 ```
 
-|register|description|defaults RGB/UV|
+|addr|register|description|
 |-|-|-|
-|0x00| documentation | |
-|0xEC| max red | 64 |
-|0xED| max green | 64 |
-|0xEE| max blue | 0 / 255 |
-|0xEF| max background | 255 |
-|0xF0| min red | 10 |
-|0xF1| min green | 10 |
-|0xF2| min blue | 0 |
-|0xF3| min background | 0 |
-|0xF4| speed red | 2 |
-|0xF5| speed green | 2 |
-|0xF6| speed blue | 0 / 2 |
-|0xF7| speed background | 2 |
-|0xF8| phase red | 0 |
-|0xF9| phase green | 0 |
-|0xFA| phase blue | 0 |
-|0xFB| phase background | 128 |
-|0xFC| LED mode:<br>bits 0..1: LED ctrl 0=auto, 1=I2C, 2=WS2812<br>bit 4: LED type 0=RGB, 1=UV | 0 |
-|0xFD| write 42 to save current register values as new default | |
+|0x00| docs | some info about the add-on |
+|0xEC-EF | max | max for red, green, blue and background channels |
+|0xF0-F3| min | min for red, green, blue and background  channels |
+|0xF4-F7| speed | fading speed per channel, 0 no fading |
+|0xF8-FB| phase | offset within fading animation per channel |
+|0xFC| mode | bits 0..1: LED ctrl 0=auto, 1=I2C, 2=WS2812<br>bit 4: LED type 0=RGB, 1=UV |
+|0xFD| save | write 42 to save current register values as new default | 
