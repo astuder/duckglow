@@ -165,13 +165,10 @@ struct i2c_regs_t i2c_regs = {
 			"Of a puddle or a pond.\n"
 			"When it dines or sups,\n"
 			"It bottoms ups.\n\n"
-			"Regs (R,G,B,BG):\n"
-			"EC max\n"
-			"F0 min\n"
-			"F4 spd\n"
-			"F8 ph\n"
-			"FC [0-1]auto/i2c/ws [4]rgb/uv\n"
-			"FD 42=save\0",
+			"github.com/astuder/duckGLOW\n"
+			"hackaday.io/project/198918-duckglow-sao\n"
+			"by Adrian Studer\n"
+			"\0",
 			{ 64, 64, 0, 255 },		// RGB, BG max
 			{ 10, 10, 0, 0 },		// RGB, BG min
 			{ 2, 2, 0, 2 },			// RGB, BG speed
