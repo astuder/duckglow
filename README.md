@@ -15,23 +15,23 @@ The SAO has four channels: red, green and blue for the duck LED, and on the
 duckJAWS variant, red background lightning.
 
 The SAO implements smooth fading configurable per channel. The LED brightness
-fades between *max* and *min* value, at the chosen *speed*. If speed is 0,
-the LED will steadily glow at the configured maximum. The *phase* parameter
+fades between **max** and **min** value, at the chosen **speed**. If speed is 0,
+the LED will steadily glow at the configured maximum. The **phase** parameter
 sets the offset in the fading waveform.
 
-The *mode* register can be used to select the interface for LED control
+The **mode** register can be used to select the interface for LED control
 (auto-detect, I2C or WS2812), and to check what type of LED was detected
 (RGB or UV). 
 
 The current settings can be stored as power-on preset by writing decimal *42*
-to the *save* register.
+to the **save** register.
 
 ### I2C Address
 
 The default I2C address of the duckGLOW SAO is *`0x6C`*. The address can be 
 changed by closing solder jumpers on the back of the circuit board. 
-
 |SJ1|SJ2|Address|
+|-|-|-|
 |O|O|0x6C|
 |C|O|0x6D|
 |O|C|0x6E|
@@ -69,7 +69,7 @@ Wire.endTransmission();
 ```
 
 |register|description|defaults RGB/UV|
-|-|-|-|-|
+|-|-|-|
 |0x00| documentation | |
 |0xEC| max red | 64 |
 |0xED| max green | 64 |
