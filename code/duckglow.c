@@ -24,6 +24,11 @@
 #define WS2812_PIN	PC0
 #define WS2812_CH	3
 
+#define ERR_NONE 0
+#define ERR_INVALID_PRESETS 1
+#define ERR_UNLOCK_FLASH_FAILED 2
+#define ERR_PRESETS_NO_CHANGE 3
+
 uint8_t pwm_chan[] = { LED_R_CH, LED_G_CH, LED_B_CH, LED_BG_CH };
 
 // flag to indicate detection of UV LED
@@ -147,7 +152,8 @@ struct i2c_regs_t {
 			volatile uint8_t speed[4];		// LED fader speed RGB,BG
 			volatile uint8_t phase[4];		// LED fader phase RGB,BG (0-255, offset into lookup-table)
 			volatile uint8_t mode;			// Bits 0-1: auto/I2C/WS2812 mode, bit 4: detected LED type RGB/UV
-			volatile uint8_t save;			// 0x42 = save current register settings to flash
+			volatile uint8_t save;			// 42 = save current register settings to flash
+			volatile uint8_t debug;			// error codes for debugging
 		} regs;
 		uint8_t data[255];
 	};
@@ -173,7 +179,7 @@ struct i2c_regs_t i2c_regs = {
 			{ 10, 10, 0, 0 },		// RGB, BG min
 			{ 2, 2, 0, 2 },			// RGB, BG speed
 			{ 0, 0, 0, 128 },		// RGB, BG phase
-			0, 0					// mode, save
+			0, 0, 0					// mode, save, error
 		}
 	}
 };
@@ -198,30 +204,32 @@ void on_i2c_read(uint8_t reg)
 	// do something?
 }
 
+#define PRESETS_MAGIC 0x6475636b	// "duck"
+#define PRESETS_VERSION 2		// increment when modifing I2C register structure
+#define PRESETS_REGS_SIZE (sizeof(i2c_regs.regs) - sizeof(i2c_regs.regs.poem) - 2)	// exclude save and error regs
+#define PRESETS_ADDR 0x08003fc0	// points to page 255 in flash, we hope our code will never use that much flash
+
 // structure of configuration data saved to flash
 typedef struct {
 	union {
 		struct fields_t {
 			uint32_t magic;
 			uint8_t version;
-			char regs[sizeof(i2c_regs.regs)-1];		// exclude last register (save command reg)
+			char regs[PRESETS_REGS_SIZE];
 		} fields;
-		uint32_t raw[16];
+		volatile uint32_t raw[16];
 	};
 } presets_t;
-
-#define PRESETS_MAGIC 0x6475636b	// "duck"
-#define PRESETS_VERSION 2		// increment when modifing I2C register structure
-#define PRESETS_REGS_SIZE (sizeof(i2c_regs.regs) - sizeof(i2c_regs.regs.poem) - 1)
-#define PRESETS_ADDR 0x08003fc0	// points to page 255 in flash, we hope our code will never use that much flash
 
 presets_t *flash_presets = (presets_t*) PRESETS_ADDR;
 
 // load register settings from flash
 bool presets_load(void)
 {
+	i2c_regs.regs.debug = ERR_NONE;
 	// verify that magic and version do match
 	if (flash_presets->fields.magic != PRESETS_MAGIC || flash_presets->fields.version != PRESETS_VERSION) {
+		i2c_regs.regs.debug = ERR_INVALID_PRESETS;	// presets invalid
 		return 0;
 	}
 
@@ -235,13 +243,14 @@ bool presets_load(void)
 // save current register settings to flash
 bool presets_save(void)
 {
+	i2c_regs.regs.debug = ERR_NONE;
 	// fill in presets structure
 	presets_t p;
-	p.fields.magic = PRESETS_MAGIC;
-	p.fields.version = PRESETS_VERSION;
 	for (uint8_t i=0; i<16; i++) {
 		p.raw[i] = 0;
 	}
+	p.fields.magic = PRESETS_MAGIC;
+	p.fields.version = PRESETS_VERSION;
 	for (uint8_t i=0; i<PRESETS_REGS_SIZE; i++) {
 		p.fields.regs[i] = i2c_regs.data[I2C_REG_START+i];
 	}
@@ -255,6 +264,7 @@ bool presets_save(void)
 	}
 	if (diff == 0) {
 		// presets already up-to-date, still report success
+		i2c_regs.regs.debug = ERR_PRESETS_NO_CHANGE;
 		return 1;
 	}
 
@@ -265,6 +275,7 @@ bool presets_save(void)
 	FLASH->MODEKEYR = 0xCDEF89AB;
 	if (FLASH->CTLR & 0x8080) {
 		// failed to unlock flash
+		i2c_regs.regs.debug = ERR_UNLOCK_FLASH_FAILED;
 		return 0;
 	}
 
@@ -293,6 +304,41 @@ bool presets_save(void)
 	return 1;
 }
 
+bool factory_reset() {
+	i2c_regs.regs.debug = ERR_NONE;
+	// erase custom presets from flash
+	if (flash_presets->fields.magic == PRESETS_MAGIC) {
+		// unlock flash
+		FLASH->KEYR = 0x45670123;
+		FLASH->KEYR = 0xCDEF89AB;
+		FLASH->MODEKEYR = 0x45670123;
+		FLASH->MODEKEYR = 0xCDEF89AB;
+		if (FLASH->CTLR & 0x8080) {
+			// failed to unlock flash
+			i2c_regs.regs.debug = ERR_UNLOCK_FLASH_FAILED;
+			return 0;
+		}
+
+		// erase page
+		FLASH->CTLR = CR_PAGE_ER;
+		FLASH->ADDR = (intptr_t) PRESETS_ADDR;
+		FLASH->CTLR = CR_STRT_Set | CR_PAGE_ER;
+		while (FLASH->STATR & FLASH_STATR_BSY);
+
+		// lock flash
+		FLASH->CTLR = CR_LOCK_Set;
+	}
+
+	// force reset after 1 second by enabling watchdog
+	IWDG->CTLR = 0x5555;
+	IWDG->PSCR = IWDG_Prescaler_128;
+	IWDG->CTLR = 0x5555;
+	IWDG->RLDR = 0xff & 0xfff;
+	IWDG->CTLR = 0xCCCC;
+	IWDG->CTLR = 0xAAAA;
+	while(1);
+}
+
 int main()
 {
 	SystemInit();
@@ -317,30 +363,37 @@ int main()
 	uint8_t i2c_addr = I2C_ADDR + (((funDigitalRead(PD6) << 1) + funDigitalRead(PD5)) ^ 3);
 
 	// detect RGB LED on R pin with pull-down reads highish
+	uv_led = 0;
 	funPinMode(LED_R_PIN, GPIO_CFGLR_IN_PUPD);
 	funDigitalWrite(LED_R_PIN, 1);	// start high to use 150mV schmitt trigger hystersis to over benefit
 	Delay_Ms(10);
 	funDigitalWrite(LED_R_PIN, 0);
 	Delay_Ms(10);
-	uv_led = 0;
 	if (funDigitalRead(LED_R_PIN) == 0) {
+		uv_led = 1;
+	}
+
+	if (uv_led) {
 		// No RGB LED connected -> hard coded default I2C settings for for UV duck
 		i2c_regs.regs.max[2] = 255;
 		i2c_regs.regs.min[2] = 0;
 		i2c_regs.regs.speed[2] = 2;
-		i2c_regs.regs.mode |= 0x10;	// set bit to indicate UV LED
-		uv_led = 1;
 	}
 
 	// load presets from flash
 	presets_load();
+
+	// override uv bit
+	if (uv_led) {
+		i2c_regs.regs.mode |= 0x10;	// set bit to indicate UV LED
+	}
 
 	// setup I2C	
 	funPinMode(PC1, GPIO_CFGLR_OUT_10Mhz_AF_OD);
 	funPinMode(PC2, GPIO_CFGLR_OUT_10Mhz_AF_OD);
 	SetupI2CSlave(i2c_addr, i2c_regs.data, sizeof(i2c_regs.data), on_i2c_write, on_i2c_read, false);
 
-	// init TIM1 for PWM
+	// init TIM1 and related GPIO for PWM
 	t1pwm_init();
 
 	// init TIM2 for input capture mode
@@ -353,8 +406,13 @@ int main()
 	while(1)
 	{
 		if (i2c_regs.regs.save == 42) {
-			presets_save();
 			i2c_regs.regs.save = 0;
+			presets_save();
+		}
+
+		if (i2c_regs.regs.save == 24) {
+			i2c_regs.regs.save = 0;
+			factory_reset();
 		}
 
 		uint8_t led_mode = i2c_regs.regs.mode & 0x03;
