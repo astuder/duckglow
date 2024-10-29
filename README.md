@@ -72,9 +72,9 @@ Wire.endTransmission();
 |address|name|description|
 |-|-|-|
 |0x00| docs | some info about the add-on |
-|0xEC-EF | max | max for red, green, blue and background channels |
-|0xF0-F3| min | min for red, green, blue and background  channels |
-|0xF4-F7| speed | fading speed per channel, 0 no fading |
+|0xEC-EF | max | max brightness for red, green, blue and background channels |
+|0xF0-F3| min | min brightness for red, green, blue and background  channels |
+|0xF4-F7| speed | fading speed per channel, 0 no fading = set LED to max value |
 |0xF8-FB| phase | offset within fading animation per channel |
 |0xFC| mode | bits 0..1: LED ctrl 0=auto, 1=I2C, 2=WS2812<br>bit 4: LED type 0=RGB, 1=UV |
 |0xFD| save | write 42 to save current register values as new default<br>write 24 for factory reset |
