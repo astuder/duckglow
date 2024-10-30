@@ -175,7 +175,7 @@ struct i2c_regs_t i2c_regs = {
 			"hackaday.io/project/198918-duckglow-sao\n"
 			"by Adrian Studer\n"
 			"\0",
-			{ 64, 64, 0, 255 },		// RGB, BG max
+			{ 80, 80, 0, 255 },		// RGB, BG max
 			{ 10, 10, 0, 0 },		// RGB, BG min
 			{ 2, 2, 0, 2 },			// RGB, BG speed
 			{ 0, 0, 0, 128 },		// RGB, BG phase
