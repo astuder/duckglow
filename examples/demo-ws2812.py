@@ -1,6 +1,10 @@
 import neopixel
 import time
 
+# controlling duckGLOW LED like a NeoPixel
+# note that the duck will switch/glitch to default animation when
+# an I2C write is detected
+
 # GPIO2 of duck (gpio_2) for WS2812 control
 duckgp2=gpio42
 # max brightness (0-255)
