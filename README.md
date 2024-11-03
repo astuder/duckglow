@@ -7,6 +7,9 @@ controllable over I2C, or like an addressable LED following the WS2812
 See [hackaday.io](https://hackaday.io/project/198918-duckglow-sao) for more
 information.
 
+See [examples folder](./examples) for sample code to run on the SuperCon 8
+SAO badge, or an Arduino.
+
 ## I2C Interface
 
 The LED of the duckGLOW SAO can be controlled over I2C. 
