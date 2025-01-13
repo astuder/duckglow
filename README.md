@@ -10,7 +10,7 @@ information.
 See [examples folder](./examples) for sample code to run on the SuperCon 8
 SAO badge, or an Arduino.
 
-I have a few assembled units of the duckJAWS variant for sale on [Tinie](https://www.tindie.com/products/astuder/duckjaws-sao/).
+I have a few assembled units of the duckJAWS variant for sale on [Tindie](https://www.tindie.com/products/astuder/duckjaws-sao/).
 
 ## I2C Interface
 
